@@ -2,6 +2,9 @@
 
 package com.jessecorbett.painter
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import web.canvas.CanvasImageSource
 import web.canvas.OffscreenCanvas
 import web.canvas.OffscreenCanvasRenderingContext2D
@@ -42,15 +45,17 @@ class CanvasRenderer(
     /**
      * Renders a list of [Layer] objects in sequence onto the canvas.
      *
-     * This function clears the canvas, fetches/processes all required images asynchronously,
-     * and draws them sequentially.
+     * This function clears the canvas, fetches and processes all required images in parallel
+     * using coroutines, and then draws them sequentially.
      *
      * @param layers The list of layers to render, in bottom-to-top order.
      */
-    suspend fun render(layers: List<Layer>) {
+    suspend fun render(layers: List<Layer>) = coroutineScope {
         val layersToDraw: List<RenderedLayer> = layers.map { layer ->
-            RenderedLayer(getImageSource(layer.url, layer.hex), layer.mirrored)
-        }
+            async {
+                RenderedLayer(getImageSource(layer.url, layer.hex), layer.mirrored)
+            }
+        }.awaitAll()
 
         ctx.clearRect(0.0, 0.0, width.toDouble(), height.toDouble())
         layersToDraw.forEach { layer ->

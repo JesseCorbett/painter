@@ -10,8 +10,10 @@ A high-performance, WebAssembly-powered image layer compositor and color customi
 - 🎨 **Color Customization Engine**: Applies high-performance grayscale-intensity multiply blending to colorize/tint individual layers dynamically in real time.
 - 🔄 **Horizontal Mirroring**: Supports independent horizontal flipping of layers via 2D canvas transforms.
 - ⚡ **Conflated Rendering Queue**: Uses Kotlin coroutines and a conflated channel to automatically drop intermediate stale frames if rendering requests arrive faster than they can be processed.
+- 🚀 **Parallel Remote Fetching**: Fetches and processes all layer images concurrently via coroutine concurrency (`async`/`awaitAll`), dramatically reducing startup and composition latency.
 - 💾 **Two-Tier Caching**: Caches raw downloaded images as `ImageBitmap`s and color-baked results as `OffscreenCanvas` layers to avoid redundant network calls and pixel manipulation.
 - 📦 **TS Definitions**: Generates TypeScript declaration files (`.d.ts`) out-of-the-box for type-safe frontend integration.
+
 
 ---
 

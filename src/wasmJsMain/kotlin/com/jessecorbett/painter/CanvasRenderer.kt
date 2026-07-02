@@ -2,6 +2,7 @@
 
 package com.jessecorbett.painter
 
+import web.canvas.CanvasImageSource
 import web.canvas.OffscreenCanvas
 import web.canvas.OffscreenCanvasRenderingContext2D
 import web.canvas.convertToBlob
@@ -11,52 +12,68 @@ import web.http.fetch
 import web.images.ImageBitmap
 import web.images.createImageBitmap
 
+@Suppress("unused")
 private fun getContext(canvas: OffscreenCanvas): OffscreenCanvasRenderingContext2D = js("canvas.getContext('2d')")
 
 class CanvasRenderer(
     private val canvas: OffscreenCanvas,
-    private val width: Int = 512,
-    private val height: Int = 512
+    private val width: Int,
+    private val height: Int
 ) {
     private val ctx = getContext(canvas)
-    private val imageCache = mutableMapOf<String, ImageBitmap>()
-    private val bakedImages = mutableMapOf<String, OffscreenCanvas>()
+    private val imageCache = mutableMapOf<String, CanvasImageSource>()
+    private val imageColors = mutableMapOf<String, String?>()
 
     init {
         canvas.width = width.toDouble()
         canvas.height = height.toDouble()
     }
 
-    suspend fun render(layers: List<PainterLayer>, callback: (String) -> Unit) {
+    suspend fun render(layers: List<Layer>) {
         val layersToDraw: List<RenderedLayer> = layers.map { layer ->
-            loadImageBitmap(layer.url).let { bitmap ->
-                layer.hex?.let { color ->
-                    renderCustomization(bitmap, layer.url, color)
-                } ?: bitmap
-            }.let { source ->
-                RenderedLayer(source, layer.flipped ?: false)
-            }
+            RenderedLayer(getImageSource(layer.url, layer.hex), layer.mirrored ?: false)
         }
 
         ctx.clearRect(0.0, 0.0, width.toDouble(), height.toDouble())
         layersToDraw.forEach { layer ->
             drawImage(layer.source, layer.mirrored)
         }
-
-        callback(FileReaderSync().readAsDataURL(canvas.convertToBlob()))
     }
 
-    private fun renderCustomization(image: ImageBitmap, srcUrl: String, hexColor: String): OffscreenCanvas {
-        val cacheKey = "$srcUrl#$hexColor"
-        bakedImages[cacheKey]?.let { return it }
+    suspend fun getDataUrl(): String = FileReaderSync().readAsDataURL(canvas.convertToBlob())
 
-        // Evict old colors to prevent memory leaks
-        bakedImages.keys
-            .filter { it.startsWith("$srcUrl#") }
-            .forEach { bakedImages.remove(it) }
+    private suspend fun getImageSource(url: String, hex: String?): CanvasImageSource {
+        val cached = imageCache[url]
+        val cachedHex = imageColors[url]
 
-        // Create a new OffscreenCanvas for the baked customized layer
+        if (cached != null && cachedHex == hex) {
+            return cached
+        }
 
+        val bitmap = if (cached is ImageBitmap && cachedHex == null) {
+            cached
+        } else {
+            val response = fetch(url)
+            if (!response.ok) throw Exception("Failed to load: $url")
+            createImageBitmap(response.blob())
+        }
+
+        val result = if (hex != null) {
+            bakeCustomization(bitmap, hex)
+        } else {
+            bitmap
+        }
+
+        imageCache[url] = result
+        imageColors[url] = hex
+
+        return result
+    }
+
+    /**
+     * Takes a bitmap input and applies our color mult operation to create a customized image
+     */
+    private fun bakeCustomization(image: ImageBitmap, hexColor: String): OffscreenCanvas {
         val baseCanvas = OffscreenCanvas(this.width.toDouble(), this.height.toDouble())
         val baseCtx = getContext(baseCanvas)
 
@@ -69,14 +86,12 @@ class CanvasRenderer(
         var i = 0
         val len = data.length
         while (i < len) {
-            // Read bytes and convert to unsigned Int for arithmetic
             val intensity = data[i].toInt() and 0xFF
             val alpha = data[i + 3].toInt() and 0xFF
 
             if (alpha != 0) {
                 val intensityScale = intensity / 255.0
 
-                // Set explicitly via Wasm-safe typed array bounds
                 data[i] = (maskColor.r * intensityScale).toInt().toJsNumber()
                 data[i + 1] = (maskColor.g * intensityScale).toInt().toJsNumber()
                 data[i + 2] = (maskColor.b * intensityScale).toInt().toJsNumber()
@@ -85,12 +100,11 @@ class CanvasRenderer(
         }
 
         baseCtx.putImageData(imageData, 0, 0)
-        bakedImages[cacheKey] = baseCanvas
 
         return baseCanvas
     }
 
-    private fun drawImage(imageSource: Any, mirrored: Boolean) {
+    private fun drawImage(imageSource: CanvasImageSource, mirrored: Boolean) {
         if (mirrored) {
             ctx.save()
             ctx.scale(-1.0, 1.0)
@@ -107,18 +121,6 @@ class CanvasRenderer(
         }
     }
 
-    private suspend fun loadImageBitmap(url: String): ImageBitmap {
-        imageCache[url]?.let { return it }
-
-        val response = fetch(url)
-        if (!response.ok) throw Exception("Failed to load: $url")
-
-        val blob = response.blob()
-        val bitmap = createImageBitmap(blob)
-
-        imageCache[url] = bitmap
-        return bitmap
-    }
 
     private fun hexToRgb(hex: String): RGB {
         val rawHex = hex.removePrefix("#")
@@ -130,5 +132,5 @@ class CanvasRenderer(
         )
     }
 
-    private data class RenderedLayer(val source: Any, val mirrored: Boolean)
+    private data class RenderedLayer(val source: CanvasImageSource, val mirrored: Boolean)
 }

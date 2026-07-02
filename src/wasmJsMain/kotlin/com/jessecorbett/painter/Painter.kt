@@ -1,9 +1,11 @@
-@file:OptIn(ExperimentalWasmJsInterop::class)
+@file:OptIn(ExperimentalWasmJsInterop::class, ExperimentalCoroutinesApi::class)
 
 package com.jessecorbett.painter
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import web.canvas.OffscreenCanvas
 import web.console.console
@@ -24,12 +26,13 @@ external class PainterMessage : JsAny {
 external class PainterLayer : JsAny {
     val url: String
     val hex: String?
-    val flipped: Boolean?
+    val mirrored: Boolean?
 }
 
 fun main() {
     val scope = CoroutineScope(SupervisorJob())
     var renderer: CanvasRenderer? = null
+    val renderChannel = Channel<List<Layer>>(Channel.CONFLATED)
 
     self.addEventHandler(EventType("message")) { event: MessageEvent<PainterMessage> ->
         val data = event.data
@@ -40,13 +43,26 @@ fun main() {
         }
 
         data.layers?.let { layers ->
-            renderer?.let { renderer ->
-                scope.launch {
-                    console.log("Drawing ${layers.length} layers in Painter")
-                    renderer.render(layers.toList()) { dataUrl ->
-                        self.postMessage(dataUrl)
-                    }
-                }
+            renderChannel.trySend(layers.toList().map {
+                Layer(
+                    url = it.url,
+                    hex = it.hex,
+                    mirrored = it.mirrored ?: false
+                )
+            })
+        }
+    }
+
+    self.postMessage("Ready")
+
+    scope.launch {
+        for (message in renderChannel) {
+            val r = renderer ?: continue
+
+            r.render(message)
+
+            if (renderChannel.isEmpty) {
+                self.postMessage(r.getDataUrl())
             }
         }
     }

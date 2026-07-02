@@ -15,6 +15,16 @@ import web.images.createImageBitmap
 @Suppress("unused")
 private fun getContext(canvas: OffscreenCanvas): OffscreenCanvasRenderingContext2D = js("canvas.getContext('2d')")
 
+/**
+ * Manages rendering of multiple [Layer]s onto an [OffscreenCanvas].
+ *
+ * It handles resource loading (via fetch), caching of both raw and color-baked assets,
+ * image color customization (blending), and horizontal mirroring transformations.
+ *
+ * @param canvas The target [OffscreenCanvas] to draw onto.
+ * @param width The target width of the canvas in pixels.
+ * @param height The target height of the canvas in pixels.
+ */
 class CanvasRenderer(
     private val canvas: OffscreenCanvas,
     private val width: Int,
@@ -29,9 +39,17 @@ class CanvasRenderer(
         canvas.height = height.toDouble()
     }
 
+    /**
+     * Renders a list of [Layer] objects in sequence onto the canvas.
+     *
+     * This function clears the canvas, fetches/processes all required images asynchronously,
+     * and draws them sequentially.
+     *
+     * @param layers The list of layers to render, in bottom-to-top order.
+     */
     suspend fun render(layers: List<Layer>) {
         val layersToDraw: List<RenderedLayer> = layers.map { layer ->
-            RenderedLayer(getImageSource(layer.url, layer.hex), layer.mirrored ?: false)
+            RenderedLayer(getImageSource(layer.url, layer.hex), layer.mirrored)
         }
 
         ctx.clearRect(0.0, 0.0, width.toDouble(), height.toDouble())
@@ -40,8 +58,23 @@ class CanvasRenderer(
         }
     }
 
+    /**
+     * Converts the current state of the offscreen canvas into a base64 Data URL.
+     *
+     * @return The base64-encoded Data URL representing the rendered canvas (typically image/png).
+     */
     suspend fun getDataUrl(): String = FileReaderSync().readAsDataURL(canvas.convertToBlob())
 
+    /**
+     * Retrieves the [CanvasImageSource] for a given URL and color customization hex.
+     *
+     * This method fetches the image if not already cached. If a [hex] color is provided,
+     * it bakes the color overlay into a separate canvas and caches the result.
+     *
+     * @param url The image source URL.
+     * @param hex The optional color hex string to tint the image with.
+     * @return The prepared [CanvasImageSource] (either [ImageBitmap] or [OffscreenCanvas]).
+     */
     private suspend fun getImageSource(url: String, hex: String?): CanvasImageSource {
         val cached = imageCache[url]
         val cachedHex = imageColors[url]
@@ -71,7 +104,14 @@ class CanvasRenderer(
     }
 
     /**
-     * Takes a bitmap input and applies our color mult operation to create a customized image
+     * Applies a color multiplication (tint) filter to a source [ImageBitmap].
+     *
+     * It maps the grayscale intensity of each source pixel's channel to a scaled version
+     * of the specified [hexColor] RGB values. Transparent pixels are preserved.
+     *
+     * @param image The source [ImageBitmap].
+     * @param hexColor The hex color string to apply.
+     * @return A new [OffscreenCanvas] containing the tinted image.
      */
     private fun bakeCustomization(image: ImageBitmap, hexColor: String): OffscreenCanvas {
         val baseCanvas = OffscreenCanvas(this.width.toDouble(), this.height.toDouble())
@@ -104,6 +144,12 @@ class CanvasRenderer(
         return baseCanvas
     }
 
+    /**
+     * Draws the image source to the main canvas context, applying horizontal mirroring if requested.
+     *
+     * @param imageSource The image or canvas to draw.
+     * @param mirrored Whether to flip the image horizontally.
+     */
     private fun drawImage(imageSource: CanvasImageSource, mirrored: Boolean) {
         if (mirrored) {
             ctx.save()
@@ -122,6 +168,15 @@ class CanvasRenderer(
     }
 
 
+    /**
+     * Parses a hex color string into an [RGB] color object.
+     *
+     * Supports both short form (e.g. "#F00" -> "#FF0000") and long form (e.g. "#FF0000").
+     * The leading '#' prefix is optional.
+     *
+     * @param hex The hex color string to parse.
+     * @return The parsed [RGB] color.
+     */
     private fun hexToRgb(hex: String): RGB {
         val rawHex = hex.removePrefix("#")
         val fullHex = if (rawHex.length == 3) rawHex.map { "$it$it" }.joinToString("") else rawHex

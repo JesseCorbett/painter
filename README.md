@@ -112,17 +112,22 @@ painterWorker.postMessage({
 });
 ```
 
-### 4. Receiving the Rendered Image
+### 4. Receiving the Rendered Image / Optional Export
 
-The worker compiles the layers and posts the resulting base64-encoded Data URL of the composite image. As shown in the message listener setup (step 2), you can capture this Data URL and assign it directly to an image element:
+Because control of the canvas was transferred to the Web Worker via `transferControlToOffscreen()`, the DOM `<canvas>` element **automatically updates and displays the rendered image** as soon as the worker completes rendering. You do not need to perform any manual updates to render to the canvas UI.
+
+However, once rendering is complete, the worker also posts the base64-encoded Data URL of the composite image back to the main thread. This is useful if you need to export/save the image or set it as a source on an `<img>` tag:
 
 ```javascript
-// Example listener showing output handler
+// Example listener showing optional export handler
 painterWorker.addEventListener('message', (event) => {
   if (event.data === 'Ready') {
     // Handle ready state / canvas transfer
   } else {
+    // Optional: Capture the exported base64 Data URL
     const renderedDataUrl = event.data;
+    
+    // For example, to preview inside an <img> element:
     document.getElementById('avatar-preview').src = renderedDataUrl;
   }
 });
